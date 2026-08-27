@@ -1,8 +1,9 @@
 import socket
+import threading
 
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.bind(("localhost", 8000))
-server_socket.listen(1)
+server_socket.listen(5)
 print("Server listening on http://localhost:8000")
 
 PAGE_STYLE = """
@@ -25,27 +26,17 @@ PAGE_STYLE = """
         border-bottom: 2px solid transparent;
     }
     nav a:hover { color: #eaeaea; border-bottom: 2px solid #e85d75; }
-    h1 {
-        font-size: 2.1em;
-        margin-bottom: 6px;
-        color: #f0f0f0;
-    }
+    h1 { font-size: 2.1em; margin-bottom: 6px; color: #f0f0f0; }
     .subtitle { color: #7d8590; margin-bottom: 40px; font-size: 1.05em; }
     p { line-height: 1.7; }
     .terminal {
         background: #060608;
         border: 1px solid #262633;
         border-radius: 10px;
-        padding: 0;
         margin: 30px 0;
         overflow: hidden;
     }
-    .terminal-bar {
-        background: #16161f;
-        padding: 10px 14px;
-        display: flex;
-        gap: 6px;
-    }
+    .terminal-bar { background: #16161f; padding: 10px 14px; display: flex; gap: 6px; }
     .dot { width: 11px; height: 11px; border-radius: 50%; }
     .dot.red { background: #ff5f56; }
     .dot.yellow { background: #ffbd2e; }
@@ -100,9 +91,9 @@ def home_page(ip):
     Usually a framework handles that conversation for you. I wanted to see what it actually
     looks like underneath, so I wrote both sides by hand.</p>
 
-    <p>Right now, this exact page you're looking at was generated the moment you opened this tab.
-    Your browser sent a raw HTTP request over a TCP socket, my code read it byte by byte, and built
-    this HTML on the spot.</p>
+    <p>This page was generated the moment you opened this tab, and now it's also running on
+    its own thread — so if someone else loads the site at the same time, neither of you waits
+    on the other.</p>
 
     <div class="terminal">
         <div class="terminal-bar">
@@ -138,9 +129,9 @@ def about_page():
     <div class="log-entry"><span class="status done">[done]</span> wrote valid HTTP responses by hand — status line, headers, body</div>
     <div class="log-entry"><span class="status done">[done]</span> basic routing, so different paths show different pages</div>
     <div class="log-entry"><span class="status done">[done]</span> a proper 404 for anything unmatched</div>
+    <div class="log-entry"><span class="status done">[done]</span> each connection now runs on its own thread, so slow requests don't block others</div>
 
     <h2>Not built yet</h2>
-    <div class="log-entry"><span class="status pending">[ ]</span> handling more than one visitor at a time — right now it's one at a time, in order</div>
     <div class="log-entry"><span class="status pending">[ ]</span> reading data sent from forms (POST requests)</div>
     <div class="log-entry"><span class="status pending">[ ]</span> serving actual files instead of generating HTML in Python strings</div>
 
@@ -158,22 +149,21 @@ def not_found_page(path):
     """
     return layout("404", content)
 
-while True:
-    connection, address = server_socket.accept()
+def handle_client(connection, address):
     print("Connected by", address)
 
     request_data = connection.recv(1024).decode()
 
     if not request_data:
         connection.close()
-        continue
+        return
 
     request_line = request_data.split("\r\n")[0]
     parts = request_line.split(" ")
 
     if len(parts) != 3:
         connection.close()
-        continue
+        return
 
     method, path, version = parts
     print(f"Method: {method}, Path: {path}, Version: {version}")
@@ -196,3 +186,8 @@ while True:
 
     connection.sendall(response.encode("utf-8"))
     connection.close()
+
+while True:
+    connection, address = server_socket.accept()
+    thread = threading.Thread(target=handle_client, args=(connection, address))
+    thread.start()
