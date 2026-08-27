@@ -73,7 +73,7 @@ def layout(title, content):
     <head><title>{title}</title>{PAGE_STYLE}</head>
     <body>
         <div class="container">
-            <nav><a href="/">home</a><a href="/about">about</a></nav>
+            <nav><a href="/">home</a><a href="/about">about</a><a href="/contact">contact</a></nav>
             {content}
             <footer>this page is served by the same server you're reading about right now.</footer>
         </div>
@@ -149,16 +149,58 @@ def not_found_page(path):
     """
     return layout("404", content)
 
+def contact_page():
+    content = """
+    <h1>Say something</h1>
+    <p class="subtitle">This form submits with a plain HTML POST — no JavaScript involved.</p>
+
+    <form method="POST" action="/contact" style="margin-top: 30px;">
+        <input type="text" name="name" placeholder="your name"
+            style="width: 100%; padding: 12px; margin-bottom: 12px; background: #16161f; border: 1px solid #262633; border-radius: 6px; color: #eaeaea;">
+        <textarea name="message" placeholder="your message" rows="4"
+            style="width: 100%; padding: 12px; margin-bottom: 12px; background: #16161f; border: 1px solid #262633; border-radius: 6px; color: #eaeaea;"></textarea>
+        <button type="submit"
+            style="background: #e85d75; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer;">Send</button>
+    </form>
+    """
+    return layout("contact", content)
+
+def contact_result_page(body_data):
+    # body_data looks like: name=John&message=Hello+there
+    fields = {}
+    for pair in body_data.split("&"):
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            value = value.replace("+", " ")
+            fields[key] = value
+
+    name = fields.get("name", "someone")
+    message = fields.get("message", "")
+
+    content = f"""
+    <h1>Got it, {name}</h1>
+    <p class="subtitle">This was parsed server-side from a raw POST body.</p>
+    <div class="terminal">
+        <div class="terminal-bar">
+            <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
+        </div>
+        <div class="terminal-body"><span class="prompt">raw body:</span> {body_data}</div>
+    </div>
+    <p>No database, no email actually sent — this just proves the server read your form data correctly.</p>
+    """
+    return layout("thanks", content)
+
 def handle_client(connection, address):
     print("Connected by", address)
 
-    request_data = connection.recv(1024).decode()
+    request_data = connection.recv(4096).decode()
 
     if not request_data:
         connection.close()
         return
 
-    request_line = request_data.split("\r\n")[0]
+    lines = request_data.split("\r\n")
+    request_line = lines[0]
     parts = request_line.split(" ")
 
     if len(parts) != 3:
@@ -168,12 +210,32 @@ def handle_client(connection, address):
     method, path, version = parts
     print(f"Method: {method}, Path: {path}, Version: {version}")
 
-    if path == "/":
+    # Parse headers into a dictionary
+    headers = {}
+    for line in lines[1:]:
+        if line == "":
+            break
+        if ": " in line:
+            key, value = line.split(": ", 1)
+            headers[key] = value
+
+    # Extract body if present (comes after the blank line)
+    body_data = ""
+    if "\r\n\r\n" in request_data:
+        body_data = request_data.split("\r\n\r\n", 1)[1]
+
+    if method == "GET" and path == "/":
         status_line = "HTTP/1.1 200 OK"
         body = home_page(address[0])
-    elif path == "/about":
+    elif method == "GET" and path == "/about":
         status_line = "HTTP/1.1 200 OK"
         body = about_page()
+    elif method == "GET" and path == "/contact":
+        status_line = "HTTP/1.1 200 OK"
+        body = contact_page()
+    elif method == "POST" and path == "/contact":
+        status_line = "HTTP/1.1 200 OK"
+        body = contact_result_page(body_data)
     else:
         status_line = "HTTP/1.1 404 Not Found"
         body = not_found_page(path)
